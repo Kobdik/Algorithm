@@ -7,20 +7,33 @@ import (
 	"time"
 )
 
-type ByteSlice []byte
+type IntSlice []int
 
-func (p ByteSlice) Len() int { return len(p) }
-func (p ByteSlice) Less(i, j int) bool { return p[i] < p[j] }
-func (p ByteSlice) Swap(i, j int) { p[i], p[j] = p[j], p[i] }
+func (p IntSlice) Len() int           { return len(p) }
+func (p IntSlice) Less(i, j int) bool { return p[i] < p[j] }
+func (p IntSlice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
 func main() {
-	fmt.Println("Hello, world.")
 	rand.Seed(time.Now().UnixNano())
-	var data [4096 * 1024]byte
-	n, _ := rand.Read(data[:])
+	const n = 5000000
+	var data [n]int
+	for i := 0; i < 5000; i++ {
+		data[i] = rand.Intn(256)
+	}
+	for i := 0; i < 50; i++ {
+		fmt.Printf("%d ", data[i])
+	}
+	fmt.Printf("\nbefore sort\n")
+	slice := IntSlice(data[:])
 	fst := time.Now()
-	sort.Sort(ByteSlice(data[:]))
+	//sort.Ints(data[:])
+	sort.Sort(slice)
 	lst := time.Now()
 	dur := lst.Sub(fst)
-	fmt.Printf("Sorted %d random values in %.3f sec\n", n, dur.Seconds())
+	sorted := sort.IsSorted(slice)
+	for i := 0; i < 50; i++ {
+		fmt.Printf("%d ", data[i])
+	}
+	fmt.Printf("\nafter sort\n")
+	fmt.Printf("%d random values %v sorted in %.3f sec\n", n, sorted, dur.Seconds())
 }
