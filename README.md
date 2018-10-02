@@ -79,7 +79,7 @@ return storeIndex;
             return fstIndex;
         }
 ```
-Большое спасибо dot.net за ConcurrentQueue<T>, который позволяет обходиться нам без мьютексов. Скорее всего, он написан с использованием неблокирующей технологии <atomic>.
+Большое спасибо dot.net за ConcurrentQueue, который позволяет обходиться нам без мьютексов. Скорее всего, он написан с использованием неблокирующей технологии \<atomic\>.
   
 # C++
 
@@ -122,7 +122,7 @@ return storeIndex;
 		//std::cout << std::this_thread::get_id() << " done " << std::endl;
 	}
 ```
-В С++17 STL я не нашел готовых к применению неблокирующих контейнеров. Работа с библиотекой <atomic> для меня остаётся чёрной магией. Лучшая книга по данной теме - в книге издательства Manning "C++ Concurrency in Action" by Antony Williams. 
+В С++17 STL я не нашел готовых к применению неблокирующих контейнеров. Работа с библиотекой \<atomic\> для меня остаётся чёрной магией. Лучшая книга по данной теме - в книге издательства Manning "C++ Concurrency in Action" by Antony Williams. 
 
 # Go
 
@@ -135,7 +135,7 @@ func (data Int16Slice) workLoop(works chan *Work, counter *sync.WaitGroup) {
 	for hasWork {
 		select {
 		case work := <-works:
-			//add gorotine
+			//add goroutine
 			if data.doSort(works, work) {
 				go data.workLoop(works, counter)
 			}
