@@ -124,18 +124,20 @@ return storeIndex;
 ```
 В С++17 STL я не нашел готовых к применению неблокирующих контейнеров. Работа с библиотекой \<atomic\> для меня остаётся чёрной магией. Лучшая книга по данной теме - в книге издательства Manning "C++ Concurrency in Action" by Antony Williams. 
 
-По прошествии мучительных исканий, я всё же немного разобрался с применением неблокирующей библиотеки \<atomic\>. Пример кода в `CppSortAtom.cpp`, фрагмент неблокирующего стека LIFO приведён ниже. Особенностью решения является использование относительно небольшого буфера для хранения подготовленных к обработке блоков данных, при использовании LIFO можно обойтись порядком Log2(5 000 000), я взял с запасом - 101. 
-При формировании нового задания вызывается метод `SafeDeque::push`, в котором из стека свободных блоков берём один из головы односвязного списка. Указатель `aheap` безопасно, с точки зрения гонки потоков, сдвигается на одну позицию вверх. Далее, заполняем выбранный элемент данными для обработки и помещаем его в конец стека подготовленных заданий. Атомарный указатель `aback` безопасно  сдвигается на одну позицию вверх.
-Рабочий поток запрашивает новый блок данных, вызывая метод `SafeDeque::pop`, при этом выбирается блок с конца стека. Атомарный указатель `aback` безопасно  сдвигается на одну позицию ввниз. После обработки блока, он возвращается в голову стека свободных блоков посредством вызова метода `SafeDeque::free`. Указатель `aheap` безопасно сдвигается на одну позицию вниз и указывает на возвращенный элемент.
-Скорость сортировки не улучшилась, в лучшем случае 88 ms. Зато было интересно.
+По прошествии мучительных исканий, я всё же немного разобрался с применением неблокирующей библиотеки \<atomic\>. Пример кода в `CppSortAtom.cpp`, фрагмент неблокирующего стека LIFO приведён ниже. Особенностью решения является использование относительно небольшого буфера для хранения подготовленных к обработке блоков данных, при использовании LIFO можно обойтись порядком Log2(5 000 000), я взял с запасом - 101.
+
+При формировании нового задания вызывается метод `SafeDeque::push`, в котором из стека свободных блоков берём один из головы односвязного списка. Указатель `aheap` безопасно, с точки зрения гонки потоков, сдвигается на одну позицию вперёд. Далее, заполняем выбранный элемент данными для обработки и помещаем его в конец стека подготовленных заданий. Атомарный указатель `awork` безопасно сдвигается на одну позицию вверх.
+
+Рабочий поток запрашивает новый блок данных, вызывая метод `SafeDeque::pop`, при этом выбирается блок с головы стека. Атомарный указатель `awork` безопасно  сдвигается на одну позицию вперёд. После обработки блока, он возвращается в голову стека свободных блоков посредством вызова метода `SafeDeque::free`. Указатель `aheap` безопасно сдвигается на одну позицию вперёд и указывает на возвращенный элемент.
+Скорость сортировки не улучшилась, в лучшем случае 88 ms. Зато было интересно и память программа потребляет экономно.
 
 ```cpp
 struct WorkNode
 {
-	WorkNode *next, *prev;
+	WorkNode *next;
 	int fstIndex, lstIndex, eqlCount;
 	WorkNode() {
-		next = prev = NULL;	
+		next = NULL;	
 		fstIndex = lstIndex = eqlCount = 0;
 	}
 };
@@ -144,8 +146,8 @@ class SafeDeque
 {
 private:
 	WorkNode* root;
-	std::atomic<WorkNode*> aback{ NULL };
 	std::atomic<WorkNode*> aheap{ NULL };
+	std::atomic<WorkNode*> awork{ NULL };
 public:
 	SafeDeque() {
 		//allocate memory on heap
@@ -163,32 +165,34 @@ public:
 
 	void push(int fst, int lst) {
 		//obtain node from heap
-		WorkNode* node = aheap.load();
-		while (!aheap.compare_exchange_weak(node, node->next));
-		//node excluded from heap
-		WorkNode* back = aback.load();
+		WorkNode* heap = aheap.load();
+		//exlude from heap
+		while (!aheap.compare_exchange_weak(heap, heap->next));
+		//obtain last work node
+		WorkNode* work = awork.load();
 		//add node to lifo stack
-		while (!aback.compare_exchange_weak(back, node));
-		node->prev = back;
-		node->fstIndex = fst;
-		node->lstIndex = lst;
+		while (!awork.compare_exchange_weak(work, heap));
+		heap->next = work;
+		heap->fstIndex = fst;
+		heap->lstIndex = lst;
 	}
 
 	WorkNode* pop() {
 		//obtain last node from stack
-		WorkNode* back = aback.load();
-		if (!back) return NULL;
-		//trim back node from chain
-		while (!aback.compare_exchange_weak(back, back->prev) && back);
-		return back;
+		WorkNode* work = awork.load();
+		if (!work) return NULL;
+		//trim last node from chain
+		while (!awork.compare_exchange_weak(work, work->next) && work);
+		return work;
 	}
 	
-	void free(WorkNode* node) {
-		//return node to my heap
+	void free(WorkNode* work) {
+		//obtain last heap node
 		WorkNode* heap = aheap.load();
-		while (!aheap.compare_exchange_weak(heap, node));
+		//return work node to heap
+		while (!aheap.compare_exchange_weak(heap, work));
 		//add on head of chain
-		node->next = heap;
+		work->next = heap;
 	}
 };
 ```
