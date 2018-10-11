@@ -124,6 +124,75 @@ return storeIndex;
 ```
 В С++17 STL я не нашел готовых к применению неблокирующих контейнеров. Работа с библиотекой \<atomic\> для меня остаётся чёрной магией. Лучшая книга по данной теме - в книге издательства Manning "C++ Concurrency in Action" by Antony Williams. 
 
+По прошествии мучительных исканий, я всё же немного разобрался с применением неблокирующей библиотеки \<atomic\>. Пример кода в `CppSortAtom.cpp`, фрагмент неблокирующего стека LIFO приведён ниже. Особенностью решения является использование относительно небольшого буфера для хранения подготовленных к обработке блоков данных, при использовании LIFO можно обойтись порядком Log2(5 000 000), я взял с запасом - 101. 
+При формировании нового задания вызывается метод `SafeDeque::push`, в котором из стека свободных блоков берём один из головы односвязного списка. Указатель `aheap` безопасно, с точки зрения гонки потоков, сдвигается на одну позицию вверх. Далее, заполняем выбранный элемент данными для обработки и помещаем его в конец стека подготовленных заданий. Атомарный указатель `aback` безопасно  сдвигается на одну позицию вверх.
+Рабочий поток запрашивает новый блок данных, вызывая метод `SafeDeque::pop`, при этом выбирается блок с конца стека. Атомарный указатель `aback` безопасно  сдвигается на одну позицию ввниз. После обработки блока, он возвращается в голову стека свободных блоков посредством вызова метода `SafeDeque::free`. Указатель `aheap` безопасно сдвигается на одну позицию вниз и указывает на возвращенный элемент.
+Скорость сортировки не улучшилась, в лучшем случае 88 ms. Зато было интересно.
+
+```cpp
+struct WorkNode
+{
+	WorkNode *next, *prev;
+	int fstIndex, lstIndex, eqlCount;
+	WorkNode() {
+		next = prev = NULL;	
+		fstIndex = lstIndex = eqlCount = 0;
+	}
+};
+
+class SafeDeque
+{
+private:
+	WorkNode* root;
+	std::atomic<WorkNode*> aback{ NULL };
+	std::atomic<WorkNode*> aheap{ NULL };
+public:
+	SafeDeque() {
+		//allocate memory on heap
+		root = new WorkNode[101];
+		aheap.store(&root[0]);
+		//chain of heap nodes
+		for (int i{ 0 }; i < 100; ++i) {
+			root[i].next = &root[i + 1];
+		}
+	}
+	
+	~SafeDeque() {
+		delete root;
+	}
+
+	void push(int fst, int lst) {
+		//obtain node from heap
+		WorkNode* node = aheap.load();
+		while (!aheap.compare_exchange_weak(node, node->next));
+		//node excluded from heap
+		WorkNode* back = aback.load();
+		//add node to lifo stack
+		while (!aback.compare_exchange_weak(back, node));
+		node->prev = back;
+		node->fstIndex = fst;
+		node->lstIndex = lst;
+	}
+
+	WorkNode* pop() {
+		//obtain last node from stack
+		WorkNode* back = aback.load();
+		if (!back) return NULL;
+		//trim back node from chain
+		while (!aback.compare_exchange_weak(back, back->prev) && back);
+		return back;
+	}
+	
+	void free(WorkNode* node) {
+		//return node to my heap
+		WorkNode* heap = aheap.load();
+		while (!aheap.compare_exchange_weak(heap, node));
+		//add on head of chain
+		node->next = heap;
+	}
+};
+```
+
 # Go
 
 Для синхронизации потоков Go полагается на горутины и каналы. Настораживает тот факт, что стандартный шаблон `sort.Sort(Int16Slice(data[:]))` отрабатывает аналогичный массив за 620 ms, однако, параллельный вариант программы сортирует всего за 78 ms! См. `qsortpar.go` Также как в C# не пришлось извращаться, чтобы подсчитать, когда мои горутины все завершились. Чтобы канал works не заблокировал все горутины, когда закончатся неотсортированные блоки, применил неблокирующий код, позоляющий подсчитывать количество действующих горутин. Очень интересный инструмент на основе каналов и горутин, логика работы с потоками стала нагляднее, а количество строк кода уменьшилось почти вдвое!
